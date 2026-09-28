@@ -59,6 +59,7 @@
  <div class="sent-tag">Claimed &amp; sent from this device — locked, will not be shown to anyone else.</div>
  <div class="btns">
   <button id="send" class="send">Send report &rarr;</button>
+  <button id="inapp">Open in-app Report</button>
   <button id="copy">Copy report</button>
  </div>
 </div>
@@ -98,14 +99,6 @@ function mailto(r){
   var b=cleanBody(r.body).replace(/\n/g,'\r\n');
   return 'mailto:abuse@telegram.org?subject='+encodeURIComponent(r.subject)+'&body='+encodeURIComponent(b);
 }
-function doSend(r,claimed){
-  if(claimed)return;
-  var m=mailto(r);
-  try{window.location.href=m;}catch(e){var a=document.createElement('a');a.href=m;document.body.appendChild(a);a.click();document.body.removeChild(a);}
-  document.getElementById('send').disabled=true;
-  document.getElementById('send').classList.add('lock');
-  document.getElementById('send').textContent='Already sent from this device';
-}
 function showReport(r,claimed){
   document.getElementById('card').classList.add('on');
   const kd=document.getElementById('kind');
@@ -115,11 +108,13 @@ function showReport(r,claimed){
   document.getElementById('body').textContent=r.body;
   const cp=document.getElementById('copy');
   cp.onclick=()=>{navigator.clipboard.writeText(cleanBody(r.body)).then(()=>toast('Report copied — paste it into abuse@telegram.org (subject: '+r.subject+') and send.'))};
+  const inapp=document.getElementById('inapp');
+  inapp.onclick=()=>{window.open('https://t.me/te3laam','_blank');toast('Copy the report first, then use Report → Selling personal data in Telegram.')};
   const sbtn=document.getElementById('send');
-  sbtn.onclick=()=>doSend(r,claimed);
   if(claimed){
     document.getElementById('card').classList.add('sent');
     sbtn.classList.add('lock');sbtn.textContent='Already sent from this device';sbtn.disabled=true;
+    cp.disabled=true;inapp.disabled=true;
   }
 }
 
@@ -136,6 +131,15 @@ async function loadAll(){
     const r=reps.find(x=>x.claim_key===o.textId);
     if(r){showReport(r,true);toast('This device already sent its one report — re-sending is blocked.');return}
   }
+  // 2) immediately show the card with a loading report so buttons are visible
+  const first=reps[0];
+  showReport(first,false);
+  document.getElementById('body').textContent='Loading your random report…';
+  const sbtn=document.getElementById('send');
+  sbtn.disabled=true;sbtn.classList.add('lock');sbtn.textContent='Loading…';
+  document.getElementById('copy').disabled=true;
+  const inapp0=document.getElementById('inapp');inapp0.disabled=true;
+
   const free=[];
   for(const r of reps){
     const v=await counterVal(r.claim_key);
@@ -143,25 +147,48 @@ async function loadAll(){
   }
   if(free.length===0){
     showStatus('<b>All 30 reports have been sent.</b><br>The pool is exhausted — this page has served 30 unique senders. In-app reports against account 8307850160 can still be filed directly in Telegram.');
+    sbtn.textContent='Pool exhausted';
+    document.getElementById('copy').textContent='Copy (unavailable)';
+    inapp0.disabled=false;
     return;
   }
   const r=free[Math.floor(Math.random()*free.length)];
-  showReport(r,false);
-  document.getElementById('send').onclick=async()=>{
-    const sbtn=document.getElementById('send');
+  // now show the real report and enable the real send flow
+  document.getElementById('kind').textContent=(r.kind==='victim'?'victim voice':'other voice')+' · report #'+(r.id+1)+' of 30';
+  document.getElementById('kind').className='kind '+r.kind;
+  document.getElementById('subj').textContent=r.subject;
+  document.getElementById('body').textContent=r.body;
+  sbtn.disabled=false;sbtn.classList.remove('lock');sbtn.textContent='Send report →';
+  document.getElementById('copy').disabled=false;
+
+  const cp=document.getElementById('copy');
+  cp.onclick=()=>{navigator.clipboard.writeText(cleanBody(r.body)).then(()=>toast('Report copied — paste it into abuse@telegram.org (subject: '+r.subject+') and send.'))};
+
+  const inapp=document.getElementById('inapp');
+  inapp.disabled=false;
+  inapp.onclick=()=>{
+    navigator.clipboard.writeText(cleanBody(r.body)).then(()=>{
+      window.open('https://t.me/te3laam','_blank');
+      toast('Report copied. In Telegram: Report → Selling personal data → paste.',6000);
+    }).catch(()=>{window.open('https://t.me/te3laam','_blank')});
+  };
+
+  sbtn.onclick=async()=>{
     sbtn.disabled=true;sbtn.textContent='Locking…';
     const v0=await counterVal(r.claim_key);
-    if(v0>=1){toast('That text was just claimed by someone else — assigning you a different one.',4000);sbtn.disabled=false;sbtn.textContent='Send report →';loadAll();return}
+    if(v0>=1){toast('That text was just claimed by someone else — assigning you a different one.',4000);loadAll();return}
     await counterHit(r.claim_key);
     await counterHit('te3laam_send_phones');
     await new Promise(res=>setTimeout(res,400));
     const v1=await counterVal(r.claim_key);
-    if(v1>1){toast('Conflict: two people grabbed this text — reassigning you a different one.',4000);sbtn.disabled=false;sbtn.textContent='Send report →';loadAll();return}
+    if(v1>1){toast('Conflict: two people grabbed this text — reassigning you a different one.',4000);loadAll();return}
     save({locked:true,textId:r.claim_key,subject:r.subject,at:Date.now()});
     document.getElementById('card').classList.add('sent');
     sbtn.classList.add('lock');sbtn.textContent='Already sent from this device';
-    doSend(r,false);
-    toast('Report locked globally. Your mail app opened — review and press Send.',6000);
+    cp.disabled=true;inapp.disabled=true;
+    var m=mailto(r);
+    try{window.location.href=m;}catch(e){var a=document.createElement('a');a.href=m;document.body.appendChild(a);a.click();document.body.removeChild(a);}
+    toast('Report locked globally. Mail app opened — review and press Send.',6000);
   };
 }
 loadAll();
