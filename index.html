@@ -81,15 +81,27 @@ let toastT=null;
 function toast(msg,dur){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('show'),dur||3200)}
 
 async function counterVal(key){
+  // 6s timeout so a dead/slow network can't freeze the page; failure = 0 (treated as "free")
+  const c=new AbortController();
+  const t=setTimeout(()=>c.abort(),6000);
   try{
-    const r=await fetch(COUNTER+'get/'+key,{method:'GET'});
+    const r=await fetch(COUNTER+'get/'+key,{method:'GET',signal:c.signal});
     if(!r.ok)return 0;
     const j=await r.json();
     return (typeof j.value==='number')?j.value:0;
   }catch(e){return 0}
+  finally{clearTimeout(t)}
 }
 async function counterHit(key){
   try{await fetch(COUNTER+'hit/'+key,{method:'POST',mode:'no-cors'});}catch(e){}
+}
+// fetch all 30 in parallel with a global 12s deadline; on any failure, the whole set is treated as "free"
+async function fetchAllCounters(){
+  const results=await Promise.race([
+    Promise.all(reps.map(r=>counterVal(r.claim_key))),
+    new Promise(res=>setTimeout(()=>res(reps.map(()=>0)),12000))
+  ]);
+  return results;
 }
 
 function cleanBody(b){
@@ -141,9 +153,9 @@ async function loadAll(){
   const inapp0=document.getElementById('inapp');inapp0.disabled=true;
 
   const free=[];
-  for(const r of reps){
-    const v=await counterVal(r.claim_key);
-    if(v<1)free.push(r);
+  const vals=await fetchAllCounters();
+  for(let i=0;i<reps.length;i++){
+    if((vals[i]||0)<1)free.push(reps[i]);
   }
   if(free.length===0){
     showStatus('<b>All 30 reports have been sent.</b><br>The pool is exhausted — this page has served 30 unique senders. In-app reports against account 8307850160 can still be filed directly in Telegram.');
